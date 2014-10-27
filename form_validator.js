@@ -2,15 +2,17 @@ var FormValidator = function(options) {
   this.modelName = options.modelName;
   this.form = options.form;
   this.validators = options.validators;
+  this.customValidators = [];
   this.messages = options.messages;
   this.validFlags = [];
 
   if (this.form.data('remote') || options.remote === true) {
     (function(self) {
       self.form.on('ajax:beforeSend', function(e) {
-        self.validateForm(validators);
+        self.validateForm(self.validators);
 
         var isValid = self.validFlags.indexOf(false) == -1;
+        // console.log('isValid', isValid);
         self.validFlags = [];
 
         if (isValid) {
@@ -27,9 +29,10 @@ var FormValidator = function(options) {
   else {
     (function(self) {
       self.form.on('submit', function(e) {
-        self.validateForm(validators);
+        self.validateForm(self.validators);
 
         var isValid = self.validFlags.indexOf(false) == -1;
+        // console.log('isValid', isValid);
         self.validFlags = [];
 
         if (isValid) {
@@ -47,7 +50,7 @@ var FormValidator = function(options) {
     })(this);
   }
 
-  for (var v in validators) {
+  for (var v in this.validators) {
     (function(attribute, validatorsForAttribute, self) {
       var input = self.form.find(self.selectorFor(attribute)),
           validateEvent = 'blur';
@@ -61,7 +64,7 @@ var FormValidator = function(options) {
 
         self.validFlags = [];
       });
-    })(v, validators[v], this);
+    })(v, this.validators[v], this);
   }
 };
 
@@ -74,7 +77,12 @@ FormValidator.prototype.validatorCallbacks = {
     return element.is(':checked');
   },
   presence: function(element) {
-    return element.val().trim() != "";
+    if (element.is(':checkbox') || element.is(':radio')) {
+      return element.is(':checked');
+    }
+    else {
+      return element.val().trim() != "";
+    }
   },
   format: function(element, validator_options) {
     return validator_options['with'].test(element.val());
@@ -99,12 +107,23 @@ FormValidator.prototype.validateElement = function(element, validators) {
       var message = validatorOptions['message'] || self.messages[validatorRule];
 
       if (element.length > 0 && validatorRule in self.validatorCallbacks) {
-        var elementParent = element.parents('.input');
+        var elementParent = element.parents('.input'),
+            label = element.siblings('label').text();
+
+        if (element.is('select')) {
+          label = element.find('option:first').text();
+        }
+
+        if (element.is(':checkbox')) {
+          label = elementParent.children('label:first').text();
+        }
 
         isValid = self.validatorCallbacks[validatorRule](element, validatorOptions);
         self.validFlags.push(isValid);
 
         if (!isValid) {
+          message = message.replace('%{field}', label.replace('*', '')).trim();
+
           elementParent.addClass('field-with-error');
           elementParent.find('.error').remove();
           elementParent.append('<span class="error">' + message + '</span>');
@@ -113,7 +132,7 @@ FormValidator.prototype.validateElement = function(element, validators) {
             $('#global-error-message').removeClass('hidden');
           }
 
-          element.trigger('form_validator:fail');
+          element.trigger('form_validator:fail', [ element, message ]);
         }
         else {
           elementParent.removeClass('field-with-error');
@@ -123,11 +142,15 @@ FormValidator.prototype.validateElement = function(element, validators) {
             $('#global-error-message').addClass('hidden');
           }
 
-          element.trigger('form_validator:pass');
+          element.trigger('form_validator:pass', [element]);
         }
       }
     })(v, validators[v], this);
   }
+};
+
+FormValidator.prototype.addCustomValidator = function(customValidator) {
+  this.customValidators.push(customValidator);
 };
 
 FormValidator.prototype.validateForm = function(validators) {
@@ -136,6 +159,14 @@ FormValidator.prototype.validateForm = function(validators) {
       var input = self.form.find(self.selectorFor(attribute));
 
       self.validateElement(input, validatorsForAttribute);
+      if ( input.parents('.input').hasClass("field-with-error") ) {
+        return;
+      }
     })(v, validators[v], this);
+  }
+
+  for (var i = 0; i < this.customValidators.length; i++) {
+    var isValid = this.customValidators[i].call(null, this.form);
+    this.validFlags.push(isValid);
   }
 };
